@@ -1,0 +1,254 @@
+"""Persistent verified-memory learning with acceptance and rollback."""
+
+import json
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+
+from verityloop.benchmark.dataset import build_benchmark
+from verityloop.benchmark.tasks import get_initial_tasks
+from verityloop.evaluation.evaluate import evaluate_candidates
+from verityloop.evaluation.splits import split_by_family
+from verityloop.recursive_learning.acceptance import decide_acceptance
+from verityloop.recursive_learning.curate import curate_candidates
+from verityloop.recursive_learning.generate import Candidate
+from verityloop.recursive_learning.ollama_generate import generate_ollama_candidates
+from verityloop.recursive_learning.verify import verify_candidates
+from verityloop.utils.config import load_config
+
+ROOT = Path(__file__).resolve().parents[1]
+MEMORY_DIR = ROOT / "results" / "memory"
+ACTIVE = MEMORY_DIR / "verified_examples.json"
+PROPOSED = MEMORY_DIR / "proposed_examples.json"
+BACKUP = MEMORY_DIR / "verified_examples.previous.json"
+
+
+def save_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def load_verified_memory(tasks):
+    """Load persistent examples and independently re-verify every entry."""
+    if not ACTIVE.exists():
+        return []
+
+    lookup = {task.task_id: task for task in tasks}
+    raw = json.loads(ACTIVE.read_text(encoding="utf-8"))
+    verified = []
+
+    for entry in raw:
+        task = lookup.get(entry.get("task_id"))
+        code = entry.get("code", "")
+        if task is None or not code:
+            print(f"Skipping invalid memory entry: {entry.get('task_id')}")
+            continue
+
+        candidate = Candidate(
+            task_id=task.task_id,
+            code=code,
+            round_number=entry.get("round_number", 0),
+            source="persistent_verified_memory",
+        )
+        results = verify_candidates([candidate], [task])
+        if results and results[0].passed:
+            verified.append((task, code))
+        else:
+            print(f"Rejected stale/invalid memory entry: {task.task_id}")
+
+    return verified
+
+
+def main():
+    config = load_config(ROOT / "configs" / "experiment.yaml")
+    tasks = get_initial_tasks()
+    lookup = {task.task_id: task for task in tasks}
+    records = build_benchmark()
+    splits = split_by_family(
+        records,
+        train_fraction=config["benchmark"]["train_fraction"],
+        dev_fraction=config["benchmark"]["dev_fraction"],
+        test_fraction=config["benchmark"]["test_fraction"],
+        seed=config["project"]["seed"],
+    )
+
+    train_tasks = [lookup[r["task_id"]] for r in splits["train"]]
+    dev_records = splits["dev"]
+    dev_tasks = [lookup[r["task_id"]] for r in dev_records]
+
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    active_memory = load_verified_memory(tasks)
+    active_ids = {task.task_id for task, _ in active_memory}
+
+    print(f"Active verified memory entries: {len(active_memory)}")
+    print(f"Training tasks available: {len(train_tasks)}")
+    print(f"Development tasks: {len(dev_tasks)}")
+    print("\n--- Load or generate verified training candidates ---")
+
+    train_candidates = []
+    train_results = []
+    proposed_memory = list(active_memory)
+    proposal_data = []
+
+    if PROPOSED.exists():
+        print("Resuming from saved proposal; skipping expensive training generation.")
+        saved_proposal = json.loads(PROPOSED.read_text(encoding="utf-8"))
+
+        for entry in saved_proposal:
+            task = lookup.get(entry.get("task_id"))
+            code = entry.get("code", "")
+            if task is None or not code:
+                print(f"Skipping invalid proposal entry: {entry.get('task_id')}")
+                continue
+
+            candidate = Candidate(
+                task_id=task.task_id,
+                code=code,
+                round_number=entry.get("round_number", 1),
+                source="resumed_proposal",
+            )
+            result = verify_candidates([candidate], [task])
+            if result and result[0].passed:
+                train_candidates.append(candidate)
+                train_results.extend(result)
+                proposed_memory = [
+                    (t, c) for t, c in proposed_memory
+                    if t.task_id != task.task_id
+                ]
+                proposed_memory.append((task, code))
+                proposal_data.append(entry)
+            else:
+                print(f"Re-verification rejected: {task.task_id}")
+
+        train_curation = curate_candidates(train_candidates, train_results)
+    else:
+        train_candidates = generate_ollama_candidates(train_tasks)
+        train_results = verify_candidates(train_candidates, train_tasks)
+        train_curation = curate_candidates(train_candidates, train_results)
+
+        for candidate in train_curation.accepted:
+            task = lookup[candidate.task_id]
+            proposed_memory = [
+                (t, code) for t, code in proposed_memory
+                if t.task_id != task.task_id
+            ]
+            proposed_memory.append((task, candidate.code))
+
+        proposal_data = [
+            {
+                "task_id": task.task_id,
+                "family": task.family,
+                "prompt": task.prompt,
+                "function_name": task.function_name,
+                "code": code,
+                "round_number": 1,
+                "source": "ollama_generated_and_independently_verified",
+            }
+            for task, code in proposed_memory
+        ]
+        save_json(PROPOSED, proposal_data)
+
+    print(f"Training candidates re-verified/generated: {len(train_candidates)}")
+    print(f"Verified candidates accepted by curation: {len(train_curation.accepted)}")
+    print(f"Proposed memory entries: {len(proposed_memory)}")
+    print("\n--- Evaluate current system on development tasks ---")
+
+    print(f"New verified candidates: {len(train_curation.accepted)}")
+    print(f"Proposed memory entries: {len(proposed_memory)}")
+    print("\n--- Evaluate current system on development tasks ---")
+
+    current_candidates = generate_ollama_candidates(
+        dev_tasks,
+        example_solutions=active_memory[:4],
+    )
+    current_results = verify_candidates(current_candidates, dev_tasks)
+    current_metrics = evaluate_candidates(current_candidates, dev_records, tasks)
+
+    print("\n--- Evaluate proposed memory update on the same tasks ---")
+    proposed_candidates = generate_ollama_candidates(
+        dev_tasks,
+        example_solutions=proposed_memory[:4],
+    )
+    proposed_results = verify_candidates(proposed_candidates, dev_tasks)
+    proposed_curation = curate_candidates(proposed_candidates, proposed_results)
+    proposed_metrics = evaluate_candidates(proposed_candidates, dev_records, tasks)
+
+    decision = decide_acceptance(
+        baseline_dev_score=current_metrics.task_pass_rate,
+        candidate_dev_score=proposed_metrics.task_pass_rate,
+        minimum_gain=config["recursive_learning"]["minimum_pass_rate_gain"],
+        require_no_regression=config["recursive_learning"]["require_no_dev_regression"],
+    )
+
+    committed = False
+    rolled_back = not decision.accepted
+
+    if decision.accepted:
+        if ACTIVE.exists():
+            shutil.copy2(ACTIVE, BACKUP)
+        save_json(ACTIVE, proposal_data)
+        committed = True
+    else:
+        # Preserve the active memory unchanged; keep the proposal for audit.
+        print("Update rejected: active memory preserved (rollback).")
+
+    report = {
+        "experiment": "persistent_verified_memory_learning",
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "training_task_count": len(train_tasks),
+        "development_task_ids": [t.task_id for t in dev_tasks],
+        "training_candidates_generated": len(train_candidates),
+        "training_candidates_verified": sum(r.passed for r in train_results),
+        "new_verified_memory_entries": len(train_curation.accepted),
+        "active_memory_entries_before": len(active_memory),
+        "proposed_memory_entries": len(proposed_memory),
+        "development": {
+            "current_memory_pass_rate": current_metrics.task_pass_rate,
+            "proposed_memory_pass_rate": proposed_metrics.task_pass_rate,
+            "proposed_candidates_verified": sum(r.passed for r in proposed_results),
+            "proposed_candidates_curated": len(proposed_curation.accepted),
+        },
+        "acceptance": {
+            "accepted": decision.accepted,
+            "reason": decision.reason,
+            "update_committed": committed,
+            "rollback_performed": rolled_back,
+        },
+        "artifacts": {
+            "active_memory": str(ACTIVE.relative_to(ROOT)),
+            "proposed_memory": str(PROPOSED.relative_to(ROOT)),
+            "backup_memory": str(BACKUP.relative_to(ROOT)) if BACKUP.exists() else None,
+        },
+        "model_generation_performed": True,
+        "persistent_system_memory_updated": committed,
+        "model_training_performed": False,
+        "model_updated": False,
+        "final_test_evaluated": False,
+        "limitations": [
+            "This is persistent verified-example memory, not model-weight training.",
+            "Development results determine acceptance; the final test remains untouched.",
+            "A rejected proposal is retained for audit but is not activated.",
+        ],
+    }
+
+    report_path = ROOT / "results" / "logs" / "persistent_learning.json"
+    save_json(report_path, report)
+
+    print("\n===== PERSISTENT LEARNING RESULTS =====")
+    print(f"Training candidates verified: {report['training_candidates_verified']}/{len(train_candidates)}")
+    print(f"New verified memory entries: {len(train_curation.accepted)}")
+    print(f"Current-memory dev pass rate: {current_metrics.task_pass_rate:.3f}")
+    print(f"Proposed-memory dev pass rate: {proposed_metrics.task_pass_rate:.3f}")
+    print(f"Acceptance: {decision.accepted} — {decision.reason}")
+    print(f"Memory update committed: {committed}")
+    print(f"Rollback: {rolled_back}")
+    print("Model training performed: False")
+    print("Model updated: False")
+    print("Final test evaluated: False")
+    print(f"Report: {report_path.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

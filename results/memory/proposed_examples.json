@@ -1,0 +1,218 @@
+[
+  {
+    "task_id": "count_vowels_v1",
+    "family": "count_vowels",
+    "prompt": "Implement count_vowels(text), counting a, e, i, o, u regardless of case.",
+    "function_name": "count_vowels",
+    "code": "def count_vowels(text):\n    return sum(1 for char in text.lower() if char in \"aeiou\")",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "clamp_v1",
+    "family": "clamp",
+    "prompt": "Implement clamp(x, low, high), restricting x to the inclusive interval.",
+    "function_name": "clamp",
+    "code": "def clamp(x, low, high):\n    return max(low, min(x, high))",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "gcd_v1",
+    "family": "gcd",
+    "prompt": "Implement gcd(a, b): Return the non-negative greatest common divisor.",
+    "function_name": "gcd",
+    "code": "def gcd(a: int, b: int) -> int:\n    while b:\n        a, b = b, a % b\n    return a",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "is_prime_v1",
+    "family": "is_prime",
+    "prompt": "Implement is_prime(n): Return whether n is prime.",
+    "function_name": "is_prime",
+    "code": "def is_prime(n):\n    if n <= 1:\n        return False\n    if n == 2:\n        return True\n    if n % 2 == 0:\n        return False\n    for i in range(3, int(n**0.5) + 1, 2):\n        if n % i == 0:\n            return False\n    return True",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "fibonacci_v1",
+    "family": "fibonacci",
+    "prompt": "Implement fibonacci(n): Return the nth Fibonacci number, with F(0)=0 and F(1)=1.",
+    "function_name": "fibonacci",
+    "code": "def fibonacci(n):\n    if n <= 0:\n        return 0\n    elif n == 1:\n        return 1\n    else:\n        a, b = 0, 1\n        for _ in range(2, n + 1):\n            a, b = b, a + b\n        return b",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "sum_list_v1",
+    "family": "sum_list",
+    "prompt": "Implement sum_list(values): Return the sum of a list of numbers.",
+    "function_name": "sum_list",
+    "code": "def sum_list(values):\n    return sum(values)",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "unique_preserve_order_v1",
+    "family": "unique_preserve_order",
+    "prompt": "Implement unique_preserve_order(values): Return unique values in their original order.",
+    "function_name": "unique_preserve_order",
+    "code": "def unique_preserve_order(values):\n    seen = set()\n    result = []\n    for value in values:\n        if value not in seen:\n            seen.add(value)\n            result.append(value)\n    return result",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "is_anagram_v1",
+    "family": "is_anagram",
+    "prompt": "Implement is_anagram(a, b): Return whether two strings contain the same characters, ignoring case.",
+    "function_name": "is_anagram",
+    "code": "def is_anagram(a: str, b: str) -> bool:\n    return sorted(a.lower()) == sorted(b.lower())",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "count_words_v1",
+    "family": "count_words",
+    "prompt": "Implement count_words(text): Count whitespace-separated words.",
+    "function_name": "count_words",
+    "code": "def count_words(text):\n    return len(text.split())",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "longest_word_v1",
+    "family": "longest_word",
+    "prompt": "Implement longest_word(words): Return the first longest word; return an empty string for no words.",
+    "function_name": "longest_word",
+    "code": "def longest_word(words):\n    if not words:\n        return \"\"\n    return max(words, key=len)",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "is_sorted_v1",
+    "family": "is_sorted",
+    "prompt": "Implement is_sorted(values): Return whether values are in non-decreasing order.",
+    "function_name": "is_sorted",
+    "code": "def is_sorted(values):\n    return all(values[i] <= values[i + 1] for i in range(len(values) - 1))",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "chunk_list_v1",
+    "family": "chunk_list",
+    "prompt": "Implement chunk_list(values, size): Split values into consecutive chunks of size; assume size > 0.",
+    "function_name": "chunk_list",
+    "code": "def chunk_list(values, size):\n    return [values[i:i + size] for i in range(0, len(values), size)]",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "transpose_matrix_v1",
+    "family": "transpose_matrix",
+    "prompt": "Implement transpose_matrix(matrix): Return the transpose of a rectangular matrix.",
+    "function_name": "transpose_matrix",
+    "code": "def transpose_matrix(matrix):\n    return list(map(list, zip(*matrix)))",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "diagonal_sum_v1",
+    "family": "diagonal_sum",
+    "prompt": "Implement diagonal_sum(matrix): Return the sum of the main diagonal of a square matrix.",
+    "function_name": "diagonal_sum",
+    "code": "def diagonal_sum(matrix):\n    return sum(matrix[i][i] for i in range(len(matrix)))",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "dot_product_v1",
+    "family": "dot_product",
+    "prompt": "Implement dot_product(a, b): Return the dot product of two equal-length numeric lists.",
+    "function_name": "dot_product",
+    "code": "def dot_product(a, b):\n    return sum(x*y for x, y in zip(a, b))",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "median_v1",
+    "family": "median",
+    "prompt": "Implement median(values): Return the median of a non-empty numeric list.",
+    "function_name": "median",
+    "code": "def median(values):\n    values.sort()\n    n = len(values)\n    if n % 2 == 1:\n        return values[n // 2]\n    else:\n        return (values[n // 2 - 1] + values[n // 2]) / 2",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "cumulative_sum_v1",
+    "family": "cumulative_sum",
+    "prompt": "Implement cumulative_sum(values): Return the running sums of values.",
+    "function_name": "cumulative_sum",
+    "code": "def cumulative_sum(values):\n    return [sum(values[:i+1]) for i in range(len(values))]",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "balanced_brackets_v1",
+    "family": "balanced_brackets",
+    "prompt": "Implement balanced_brackets(text): Return whether parentheses, square brackets, and braces are balanced.",
+    "function_name": "balanced_brackets",
+    "code": "def balanced_brackets(text: str) -> bool:\n    stack = []\n    pairs = {')': '(', ']': '[', '}': '{'}\n    \n    for char in text:\n        if char in pairs.values():\n            stack.append(char)\n        elif char in pairs:\n            if not stack or stack.pop() != pairs[char]:\n                return False\n    return not stack",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "binary_to_decimal_v1",
+    "family": "binary_to_decimal",
+    "prompt": "Implement binary_to_decimal(text): Convert a non-empty binary string to a base-10 integer.",
+    "function_name": "binary_to_decimal",
+    "code": "def binary_to_decimal(text):\n    return int(text, 2)",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "decimal_to_binary_v1",
+    "family": "decimal_to_binary",
+    "prompt": "Implement decimal_to_binary(n): Return the binary representation of a non-negative integer without a prefix.",
+    "function_name": "decimal_to_binary",
+    "code": "def decimal_to_binary(n):\n    return bin(n)[2:]",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "group_by_length_v1",
+    "family": "group_by_length",
+    "prompt": "Implement group_by_length(words): Group words by length into a dictionary mapping lengths to lists.",
+    "function_name": "group_by_length",
+    "code": "def group_by_length(words):\n    length_dict = {}\n    for word in words:\n        word_length = len(word)\n        if word_length not in length_dict:\n            length_dict[word_length] = []\n        length_dict[word_length].append(word)\n    return length_dict",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "is_subsequence_v1",
+    "family": "is_subsequence",
+    "prompt": "Implement is_subsequence(a, b): Return whether sequence a is a subsequence of sequence b.",
+    "function_name": "is_subsequence",
+    "code": "def is_subsequence(a, b):\n    a_index = 0\n    for i, char in enumerate(b):\n        if a_index == len(a):\n            break\n        if a[a_index] == char:\n            a_index += 1\n    return a_index == len(a)",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "run_length_encode_v1",
+    "family": "run_length_encode",
+    "prompt": "Implement run_length_encode(text): Return consecutive character runs as (character, count) pairs.",
+    "function_name": "run_length_encode",
+    "code": "def run_length_encode(text):\n    if not text:\n        return []\n    result = []\n    count = 1\n    for i in range(1, len(text)):\n        if text[i] == text[i - 1]:\n            count += 1\n        else:\n            result.append((text[i - 1], count))\n            count = 1\n    result.append((text[-1], count))\n    return result",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  },
+  {
+    "task_id": "first_nonrepeating_v1",
+    "family": "first_nonrepeating",
+    "prompt": "Implement first_nonrepeating(text): Return the first non-repeating character, or None if none exists.",
+    "function_name": "first_nonrepeating",
+    "code": "def first_nonrepeating(text: str) -> str:\n    char_count = {}\n    for char in text:\n        if char in char_count:\n            char_count[char] += 1\n        else:\n            char_count[char] = 1\n\n    for char in text:\n        if char_count[char] == 1:\n            return char\n\n    return None",
+    "round_number": 1,
+    "source": "verified_training_example_memory"
+  }
+]

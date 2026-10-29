@@ -1,0 +1,350 @@
+
+"""Run the initial VerityLoop recursive-learning pipeline."""
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from verityloop.benchmark.tasks import get_initial_tasks
+from verityloop.recursive_learning.generate import generate_baseline_candidates
+
+"""Run the VerityLoop recursive-learning pipeline smoke test."""
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from verityloop.benchmark.dataset import build_benchmark
+from verityloop.benchmark.tasks import get_initial_tasks
+from verityloop.evaluation.evaluate import evaluate_candidates
+from verityloop.evaluation.metrics import EvaluationMetrics
+from verityloop.evaluation.splits import split_by_family
+from verityloop.recursive_learning.acceptance import decide_acceptance
+from verityloop.recursive_learning.curate import curate_candidates
+from verityloop.recursive_learning.generate import (
+    Candidate,
+    generate_baseline_candidates,
+)
+from verityloop.recursive_learning.train import prepare_candidate_set
+from verityloop.recursive_learning.verify import verify_candidates
+from verityloop.utils.config import load_config
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def metrics_to_dict(metrics: EvaluationMetrics) -> dict:
+    """Convert evaluation metrics into JSON-compatible values."""
+    return {
+        "task_count": metrics.task_count,
+        "passed_tasks": metrics.passed_tasks,
+        "passed_tests": metrics.passed_tests,
+        "total_tests": metrics.total_tests,
+        "task_pass_rate": metrics.task_pass_rate,
+        "test_pass_rate": metrics.test_pass_rate,
+    }
+
+
+def main() -> None:
+    """Run a reproducible pipeline smoke test and acceptance-policy check."""
+    config = load_config(ROOT / "configs" / "experiment.yaml")
+    tasks = get_initial_tasks()
+    records = build_benchmark()
+
+    splits = split_by_family(
+        records,
+        train_fraction=config["benchmark"]["train_fraction"],
+        dev_fraction=config["benchmark"]["dev_fraction"],
+        test_fraction=config["benchmark"]["test_fraction"],
+        seed=config["project"]["seed"],
+    )
+
+    # Reference solutions are used only to validate the pipeline.
+    candidates = generate_baseline_candidates(records)
+    reports = verify_candidates(candidates, tasks)
+    curation = curate_candidates(candidates, reports)
+    round_result = prepare_candidate_set(1, curation)
+
+    # Evaluate both sets on development data only.
+    baseline_metrics = evaluate_candidates(candidates, splits["dev"], tasks)
+
+    # This replay is deliberately identical to the reference baseline.
+    # It tests acceptance-policy wiring, not actual learning.
+    replay_candidates = [
+        Candidate(
+            task_id=candidate.task_id,
+            code=candidate.code,
+            round_number=1,
+            source="reference_baseline_replay",
+        )
+        for candidate in candidates
+    ]
+    proposal_metrics = evaluate_candidates(replay_candidates, splits["dev"], tasks)
+
+    metric_name = config["evaluation"]["primary_metric"]
+    metric_fields = {
+        "accuracy": "task_pass_rate",
+        "task_pass_rate": "task_pass_rate",
+        "test_pass_rate": "test_pass_rate",
+    }
+    if metric_name not in metric_fields:
+        raise ValueError(f"Unsupported acceptance metric: {metric_name}")
+
+    score_field = metric_fields[metric_name]
+    baseline_score = getattr(baseline_metrics, score_field)
+    proposal_score = getattr(proposal_metrics, score_field)
+
+    acceptance = decide_acceptance(
+        baseline_dev_score=baseline_score,
+        candidate_dev_score=proposal_score,
+        minimum_gain=config["recursive_learning"]["minimum_pass_rate_gain"],
+        require_no_regression=config["recursive_learning"]["require_no_dev_regression"],
+    )
+
+    report = {
+        "project": config["project"]["name"],
+        "experiment_type": "pipeline_smoke_test",
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "configuration": {
+            "version": config["project"]["version"],
+            "seed": config["project"]["seed"],
+            "device": config["project"]["device"],
+            "configured_max_rounds": config["recursive_learning"]["max_rounds"],
+            "minimum_pass_rate_gain": config["recursive_learning"]["minimum_pass_rate_gain"],
+            "primary_metric": metric_name,
+        },
+        "split_counts": {name: len(items) for name, items in splits.items()},
+        "round_number": round_result.round_number,
+        "candidate_count": len(candidates),
+        "verified_pass_count": sum(item.passed for item in reports),
+        "curated_candidate_count": round_result.accepted_count,
+        "curation_rejected_count": round_result.rejected_count,
+        "baseline_dev_metrics": metrics_to_dict(baseline_metrics),
+        "proposal_dev_metrics": metrics_to_dict(proposal_metrics),
+        "acceptance": {
+            "evaluated": True,
+            "accepted": acceptance.accepted,
+            "reason": acceptance.reason,
+            "baseline_dev_score": acceptance.baseline_dev_score,
+            "proposal_dev_score": acceptance.candidate_dev_score,
+            "improvement": acceptance.improvement,
+        },
+        "model_training_performed": False,
+        "model_updated": False,
+        "final_test_evaluated": False,
+        "limitations": [
+            "Candidates are reference solutions, not model-generated proposals.",
+            "The proposal is an identical replay used to test acceptance-policy wiring.",
+            "No neural-network training or model update was performed.",
+            "This smoke test does not establish recursive self-improvement.",
+            "The final test split was not evaluated or used for selection.",
+        ],
+        "verification_results": [
+            {
+                "task_id": item.task_id,
+                "passed": item.passed,
+                "passed_tests": item.passed_tests,
+                "total_tests": item.total_tests,
+                "pass_rate": item.pass_rate,
+            }
+            for item in reports
+        ],
+    }
+
+    output_root = ROOT / config["outputs"]["root"] / "logs"
+    output_root.mkdir(parents=True, exist_ok=True)
+    output_path = output_root / "recursive_smoke_test.json"
+    output_path.write_text(
+        json.dumps(report, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    print(f"{report['project']} recursive pipeline completed.")
+    print(f"Tasks: {len(tasks)}")
+    print(f"Fully verified: {report['verified_pass_count']}")
+    print(f"Curated candidates: {report['curated_candidate_count']}")
+    print(f"Development baseline score: {baseline_score:.3f}")
+    print(f"Development proposal score: {proposal_score:.3f}")
+    print(f"Acceptance decision: {'ACCEPTED' if acceptance.accepted else 'REJECTED'}")
+    print(f"Reason: {acceptance.reason}")
+    print(f"Model training performed: {report['model_training_performed']}")
+    print(f"Final test evaluated: {report['final_test_evaluated']}")
+    print(f"Report saved: {output_path.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()
+from verityloop.recursive_learning.verify import verify_candidates
+from verityloop.recursive_learning.curate import curate_candidates
+from verityloop.recursive_learning.train import prepare_candidate_set
+
+
+ROOT = Path(__file__).resolve().parents[1]
+RESULTS_DIR = ROOT / "results" / "logs"
+
+
+def main() -> None:
+    """Execute one auditable candidate-selection round."""
+    tasks = get_initial_tasks()
+    records = [
+        {
+            "task_id": task.task_id,
+            "family": task.family,
+            "prompt": task.prompt,
+            "function_name": task.function_name,
+            "reference_code": task.reference_code,
+            "test_cases": [
+                {"inputs": list(case.inputs), "expected": case.expected}
+                for case in task.test_cases
+            ],
+        }
+        for task in tasks
+    ]
+
+    candidates = generate_baseline_candidates(records)
+    reports = verify_candidates(candidates, tasks)
+    curation = curate_candidates(candidates, reports)
+    round_result = prepare_candidate_set(1, curation)
+
+    report = {
+        "project": "VerityLoop",
+        "experiment_type": "pipeline_smoke_test",
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "round_number": round_result.round_number,
+        "task_count": len(tasks),
+        "candidate_count": len(candidates),
+        "verified_pass_count": sum(item.passed for item in reports),
+        "accepted_count": round_result.accepted_count,
+        "rejected_count": round_result.rejected_count,
+        "model_training_performed": False,
+        "results": [
+            {
+                "task_id": item.task_id,
+                "passed": item.passed,
+                "passed_tests": item.passed_tests,
+                "total_tests": item.total_tests,
+                "pass_rate": item.pass_rate,
+            }
+            for item in reports
+        ],
+    }
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = RESULTS_DIR / "recursive_smoke_test.json"
+    output_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    print("VerityLoop recursive pipeline completed.")
+    print(f"Tasks: {report['task_count']}")
+    print(f"Candidates: {report['candidate_count']}")
+    print(f"Fully verified: {report['verified_pass_count']}")
+    print(f"Accepted: {report['accepted_count']}")
+    print(f"Rejected: {report['rejected_count']}")
+    print(f"Model training performed: {report['model_training_performed']}")
+    print(f"Report saved: {output_path.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()
+
+"""Run the VerityLoop recursive-learning pipeline smoke test."""
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from verityloop.benchmark.tasks import get_initial_tasks
+from verityloop.recursive_learning.generate import generate_baseline_candidates
+from verityloop.recursive_learning.verify import verify_candidates
+from verityloop.recursive_learning.curate import curate_candidates
+from verityloop.recursive_learning.train import prepare_candidate_set
+from verityloop.utils.config import load_config
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> None:
+    """Execute one auditable candidate-selection round."""
+    config = load_config(ROOT / "configs" / "experiment.yaml")
+    tasks = get_initial_tasks()
+
+    records = [
+        {
+            "task_id": task.task_id,
+            "family": task.family,
+            "prompt": task.prompt,
+            "function_name": task.function_name,
+            "reference_code": task.reference_code,
+            "test_cases": [
+                {"inputs": list(case.inputs), "expected": case.expected}
+                for case in task.test_cases
+            ],
+        }
+        for task in tasks
+    ]
+
+    candidates = generate_baseline_candidates(records)
+    reports = verify_candidates(candidates, tasks)
+    curation = curate_candidates(candidates, reports)
+    round_result = prepare_candidate_set(1, curation)
+
+    report = {
+        "project": config["project"]["name"],
+        "experiment_type": "pipeline_smoke_test",
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "configuration": {
+            "version": config["project"]["version"],
+            "seed": config["project"]["seed"],
+            "device": config["project"]["device"],
+            "configured_max_rounds": config["recursive_learning"]["max_rounds"],
+            "configured_minimum_pass_rate_gain": (
+                config["recursive_learning"]["minimum_pass_rate_gain"]
+            ),
+        },
+        "round_number": round_result.round_number,
+        "task_count": len(tasks),
+        "candidate_count": len(candidates),
+        "verified_pass_count": sum(item.passed for item in reports),
+        "accepted_count": round_result.accepted_count,
+        "rejected_count": round_result.rejected_count,
+        "model_training_performed": False,
+        "acceptance_policy_evaluated": False,
+        "limitations": [
+            "Candidates are reference solutions, not model-generated proposals.",
+            "No neural-network training or model update was performed.",
+            "This smoke test does not establish recursive self-improvement.",
+            "The configured acceptance policy is not yet applied to dev-set scores.",
+        ],
+        "results": [
+            {
+                "task_id": item.task_id,
+                "passed": item.passed,
+                "passed_tests": item.passed_tests,
+                "total_tests": item.total_tests,
+                "pass_rate": item.pass_rate,
+            }
+            for item in reports
+        ],
+    }
+
+    output_root = ROOT / config["outputs"]["root"] / "logs"
+    output_root.mkdir(parents=True, exist_ok=True)
+    output_path = output_root / "recursive_smoke_test.json"
+    output_path.write_text(
+        json.dumps(report, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    print(f"{report['project']} recursive pipeline completed.")
+    print(f"Tasks: {report['task_count']}")
+    print(f"Candidates: {report['candidate_count']}")
+    print(f"Fully verified: {report['verified_pass_count']}")
+    print(f"Accepted: {report['accepted_count']}")
+    print(f"Rejected: {report['rejected_count']}")
+    print(f"Model training performed: {report['model_training_performed']}")
+    print(f"Acceptance policy evaluated: {report['acceptance_policy_evaluated']}")
+    print(f"Report saved: {output_path.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

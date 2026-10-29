@@ -1,0 +1,37 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and secrets
+.venv/
+venv/
+.env
+.env.*
+
+# Editable installs and build artifacts
+build/
+dist/
+
+# Experiment outputs (keep directory structure)
+results/logs/*
+results/checkpoints/*
+results/figures/*
+!results/logs/.gitkeep
+!results/checkpoints/.gitkeep
+!results/figures/.gitkeep
+
+# Generated benchmark data
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,40 @@
+
+project:
+  name: VerityLoop
+  version: "0.1.0"
+  seed: 42
+  device: cpu
+
+benchmark:
+  name: verified_coding_tasks
+  train_fraction: 0.60
+  dev_fraction: 0.20
+  test_fraction: 0.20
+  require_independent_tests: true
+
+recursive_learning:
+  enabled: true
+  max_rounds: 3
+  minimum_pass_rate_gain: 0.02
+  require_no_dev_regression: true
+  rollback_on_rejection: true
+
+distillation:
+  enabled: true
+  temperature: 3.0
+  alpha: 0.5
+  epochs: 10
+  learning_rate: 0.001
+  batch_size: 32
+
+evaluation:
+  primary_metric: accuracy
+  report_latency: true
+  report_model_size: true
+  preserve_final_test_set: true
+
+outputs:
+  root: results
+  save_checkpoints: true
+  save_logs: true
+  save_figures: true
